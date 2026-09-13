@@ -8,6 +8,7 @@ import { modRoutes } from './mod-routes.js';
 import { playerRoutes } from './player-routes.js';
 import { serverRoutes } from './server-routes.js';
 import { settingsRoutes } from './settings-routes.js';
+import { worldRoutes } from './world-routes.js';
 
 export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   await fastify.register(authRoutes);
@@ -19,4 +20,5 @@ export async function registerRoutes(fastify: FastifyInstance): Promise<void> {
   await fastify.register(playerRoutes);
   await fastify.register(backupRoutes);
   await fastify.register(settingsRoutes);
+  await fastify.register(worldRoutes);
 }
