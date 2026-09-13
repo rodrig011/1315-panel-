@@ -19,7 +19,6 @@ apt-get update
 apt-get install -y ca-certificates curl gnupg git jq rsync unzip tar openssl sqlite3 \
   ufw fail2ban unattended-upgrades apt-transport-https
 
-# Docker Engine + Compose plugin from Docker's official apt repository.
 install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 chmod a+r /etc/apt/keyrings/docker.asc
@@ -32,8 +31,6 @@ Architectures: $(dpkg --print-architecture)
 Signed-By: /etc/apt/keyrings/docker.asc
 DOCKERREPO
 
-# Node.js 24 LTS. The panel itself is containerized, but installing LTS on the
-# host keeps maintenance/build tooling available without using an EOL Ubuntu package.
 curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor --yes -o /usr/share/keyrings/nodesource.gpg
 cat >/etc/apt/sources.list.d/nodesource.list <<'NODEREPO'
 deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main
@@ -55,7 +52,6 @@ DOCKERDAEMON
 systemctl restart docker
 fi
 
-# Non-root application/deploy account. Deliberately NOT added to docker group.
 if ! id mcpanel >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash mcpanel
 fi
@@ -72,35 +68,51 @@ rsync -a --delete --exclude node_modules --exclude .next --exclude .git "$PROJEC
 chown -R mcpanel:mcpanel /opt/mcpanel/app /opt/mcpanel/staging /opt/mcpanel/releases /opt/mcpanel/data /srv/mcpanel/servers
 install -m 0644 "$PROJECT_ROOT/docker-compose.production.yml" /opt/mcpanel/docker-compose.production.yml
 
-# Reuse the root key for the deploy user when present; SSH hardening is a later,
-# explicit step after the operator verifies mcpanel login in a second session.
 if [[ -s /root/.ssh/authorized_keys && ! -s /home/mcpanel/.ssh/authorized_keys ]]; then
   install -d -o mcpanel -g mcpanel -m 0700 /home/mcpanel/.ssh
   install -o mcpanel -g mcpanel -m 0600 /root/.ssh/authorized_keys /home/mcpanel/.ssh/authorized_keys
 fi
 
+PUBLIC_IP_VALUE="${PUBLIC_IP:-}"
+if [[ -z "$PUBLIC_IP_VALUE" ]]; then
+  PUBLIC_IP_VALUE="$(curl -4 -fsS --max-time 5 https://api.ipify.org 2>/dev/null || true)"
+fi
+if [[ -z "$PUBLIC_IP_VALUE" ]]; then
+  PUBLIC_IP_VALUE="$(hostname -I | awk '{print $1}')"
+fi
+if [[ -z "$PUBLIC_IP_VALUE" ]]; then
+  echo "Could not determine the public IPv4 address. Re-run with PUBLIC_IP=x.x.x.x." >&2
+  exit 2
+fi
+
+PANEL_DOMAIN_VALUE="${PANEL_DOMAIN:-}"
+if [[ -n "$PANEL_DOMAIN_VALUE" ]]; then
+  CADDY_SITE_ADDRESS_VALUE="$PANEL_DOMAIN_VALUE"
+  PANEL_ORIGIN_VALUE="${PANEL_ORIGIN:-https://$PANEL_DOMAIN_VALUE}"
+  COOKIE_SECURE_VALUE=true
+  PANEL_URL="$PANEL_ORIGIN_VALUE"
+else
+  CADDY_SITE_ADDRESS_VALUE=":80"
+  PANEL_ORIGIN_VALUE="${PANEL_ORIGIN:-http://$PUBLIC_IP_VALUE}"
+  COOKIE_SECURE_VALUE=false
+  PANEL_URL="$PANEL_ORIGIN_VALUE"
+fi
+
+PUBLIC_HOST_VALUE="${PUBLIC_HOST:-$PUBLIC_IP_VALUE}"
+PUBLIC_HOST_VALUE="${PUBLIC_HOST_VALUE#http://}"
+PUBLIC_HOST_VALUE="${PUBLIC_HOST_VALUE#https://}"
+PUBLIC_HOST_VALUE="${PUBLIC_HOST_VALUE%%/*}"
+ADMIN_PASSWORD_VALUE=""
+
 if [[ ! -f /opt/mcpanel/.env ]]; then
-  PANEL_HOST="${PANEL_DOMAIN:-}"
-  API_HOST="${API_DOMAIN:-}"
-  if [[ -z "$PANEL_HOST" || -z "$API_HOST" ]]; then
-    echo "PANEL_DOMAIN and API_DOMAIN are required (for example panel.example.com and api.example.com)." >&2
-    exit 2
-  fi
-  ORIGIN="${PANEL_ORIGIN:-https://$PANEL_HOST}"
-  API_ORIGIN_VALUE="${API_ORIGIN:-https://$API_HOST}"
-  HOSTNAME_VALUE="${PUBLIC_HOST:-play.example.com}"
-  HOSTNAME_VALUE="${HOSTNAME_VALUE#http://}"
-  HOSTNAME_VALUE="${HOSTNAME_VALUE#https://}"
-  HOSTNAME_VALUE="${HOSTNAME_VALUE%%/*}"
   ADMIN_PASSWORD_VALUE="${ADMIN_PASSWORD:-$(openssl rand -base64 24 | tr -d '\n')}"
-  AUTH_ENCRYPTION_KEY_VALUE="$(openssl rand -base64 32 | tr "+/" "-_" | tr -d "=\n")"
+  AUTH_ENCRYPTION_KEY_VALUE="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
   AUTH_RECOVERY_PEPPER_VALUE="$(openssl rand -hex 32)"
   cat >/opt/mcpanel/.env <<ENVFILE
-PANEL_DOMAIN=$PANEL_HOST
-API_DOMAIN=$API_HOST
-PANEL_ORIGIN=$ORIGIN
-API_ORIGIN=$API_ORIGIN_VALUE
-ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+CADDY_SITE_ADDRESS=$CADDY_SITE_ADDRESS_VALUE
+PANEL_DOMAIN=$PANEL_DOMAIN_VALUE
+PANEL_ORIGIN=$PANEL_ORIGIN_VALUE
+PUBLIC_IP=$PUBLIC_IP_VALUE
 MCPANEL_UID=$MCPANEL_UID
 MCPANEL_GID=$MCPANEL_GID
 AUTH_ENCRYPTION_KEY=$AUTH_ENCRYPTION_KEY_VALUE
@@ -108,12 +120,14 @@ AUTH_RECOVERY_PEPPER=$AUTH_RECOVERY_PEPPER_VALUE
 SESSION_TTL_HOURS=12
 LOGIN_LOCKOUT_ATTEMPTS=5
 LOGIN_LOCKOUT_MINUTES=15
-TOTP_ISSUER=MCPanel
-COOKIE_DOMAIN=${COOKIE_DOMAIN:-}
+TOTP_ISSUER=1315 Panel
+COOKIE_DOMAIN=
+COOKIE_SECURE=$COOKIE_SECURE_VALUE
 ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
 ADMIN_PASSWORD=$ADMIN_PASSWORD_VALUE
 COOKIE_NAME=mc_panel_session
-PUBLIC_HOST=$HOSTNAME_VALUE
+CSRF_COOKIE_NAME=mc_panel_csrf
+PUBLIC_HOST=$PUBLIC_HOST_VALUE
 DATABASE_URL=file:/app/data/mcpanel.db
 SERVER_DATA_ROOT=/srv/mcpanel/servers
 BACKUP_ROOT=/srv/mcpanel/legacy-backups
@@ -124,15 +138,17 @@ MC_BIND_ADDRESS=0.0.0.0
 MC_DEFAULT_JAVA_VERSION=21
 MC_DEFAULT_RESTART_POLICY=unless-stopped
 MC_MANAGE_OWNERSHIP=false
-MC_HEAP_RATIO=0.75
-MC_TIMEZONE=UTC
+HOST_MEMORY_MB=8192
+MC_MAX_MEMORY_MB=6144
+MC_HEAP_RATIO=0.92
+MC_TIMEZONE=America/Chicago
 MAX_UPLOAD_BYTES=67108864
 MAX_TEXT_FILE_BYTES=2097152
 METRICS_INTERVAL_MS=5000
 METRICS_RETENTION_HOURS=24
 MOD_DOWNLOAD_HOSTS=cdn.modrinth.com
 MODRINTH_API_HOST=api.modrinth.com
-MODRINTH_USER_AGENT=minecraft-panel/1.0 (self-hosted)
+MODRINTH_USER_AGENT=1315-panel/1.0 (self-hosted)
 MODRINTH_CACHE_TTL_MS=60000
 MODRINTH_CACHE_MAX_ENTRIES=500
 MODRINTH_TIMEOUT_MS=10000
@@ -142,8 +158,6 @@ TRUST_PROXY=true
 LOG_LEVEL=info
 ENVFILE
   chmod 0600 /opt/mcpanel/.env
-  echo "Generated initial admin password: $ADMIN_PASSWORD_VALUE"
-  echo "Store it securely; it is also present in root-only /opt/mcpanel/.env."
 fi
 
 install -m 0755 "$PROJECT_ROOT/deploy/ubuntu/mcpanel-firewall.sh" /usr/local/sbin/mcpanel-firewall
@@ -164,13 +178,12 @@ visudo -cf /etc/sudoers.d/mcpanel
 systemctl enable --now fail2ban
 systemctl restart unattended-upgrades || true
 
-# Host firewall. OpenSSH is allowed before enabling UFW to avoid lockout.
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow OpenSSH
-ufw allow 80/tcp comment 'MCPanel HTTP'
-ufw allow 443/tcp comment 'MCPanel HTTPS'
-ufw allow 25565/tcp comment 'Minecraft'
+ufw allow 80/tcp comment '1315 Panel HTTP'
+ufw allow 443/tcp comment '1315 Panel HTTPS'
+ufw allow 25565/tcp comment '1315 SMP'
 ufw --force enable
 
 systemctl daemon-reload
@@ -182,8 +195,18 @@ docker compose --env-file /opt/mcpanel/.env -f /opt/mcpanel/docker-compose.produ
 docker compose --env-file /opt/mcpanel/.env -f /opt/mcpanel/docker-compose.production.yml up -d --remove-orphans
 systemctl enable mcpanel-stack.service
 
-printf '\nInstallation complete.\n'
-printf '1. Verify: sudo -u mcpanel ssh-keygen -F localhost >/dev/null 2>&1 || true\n'
-printf '2. From YOUR workstation open a second session: ssh mcpanel@<VPS-IP>\n'
-printf '3. Only after that succeeds, run: sudo mcpanel-harden-ssh\n'
-printf '4. Status: sudo mcpanel-status\n'
+printf '\n1315 Panel installation complete.\n'
+printf 'Panel URL: %s\n' "$PANEL_URL"
+printf 'Admin username: %s\n' "${ADMIN_USERNAME:-admin}"
+if [[ -n "$ADMIN_PASSWORD_VALUE" ]]; then
+  printf 'Bootstrap password: %s\n' "$ADMIN_PASSWORD_VALUE"
+else
+  printf 'Bootstrap password: existing value retained in /opt/mcpanel/.env\n'
+fi
+printf 'Minecraft join address: %s:25565\n' "$PUBLIC_HOST_VALUE"
+printf 'Status command: sudo mcpanel-status\n'
+printf 'Verify deploy SSH in a second terminal: ssh mcpanel@%s\n' "$PUBLIC_IP_VALUE"
+printf 'After that succeeds, harden SSH with: sudo mcpanel-harden-ssh\n'
+if [[ -z "$PANEL_DOMAIN_VALUE" ]]; then
+  printf '\nWARNING: the panel is using temporary plain HTTP by IP. Add a domain and HTTPS when practical.\n'
+fi
