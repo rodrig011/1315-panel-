@@ -20,9 +20,8 @@ assert proxy_volumes == ['/var/run/docker.sock:/var/run/docker.sock:ro']
 assert services['socket-proxy']['networks'] == ['control']
 assert compose['networks']['control']['internal'] is True
 assert services['backend']['environment']['DOCKER_HOST'] == 'tcp://socket-proxy:2375'
-assert services['frontend']['environment']['NEXT_PUBLIC_API_URL'] == '${API_ORIGIN}'
-assert services['caddy']['environment']['PANEL_DOMAIN'] == '${PANEL_DOMAIN}'
-assert services['caddy']['environment']['API_DOMAIN'] == '${API_DOMAIN}'
+assert services['frontend']['environment']['NEXT_PUBLIC_API_URL'] == ''
+assert services['caddy']['environment']['CADDY_SITE_ADDRESS'] == '${CADDY_SITE_ADDRESS}'
 
 for name, service in services.items():
     assert service.get('privileged') is not True, name
@@ -31,19 +30,32 @@ firewall = (root / 'deploy/ubuntu/mcpanel-firewall.sh').read_text()
 assert '--dports 80,443,25565' in firewall
 
 env = (root / '.env.example').read_text()
+assert 'CADDY_SITE_ADDRESS=:80' in env
+assert 'PANEL_DOMAIN=' in env
+assert 'PANEL_ORIGIN=http://203.0.113.10' in env
+assert 'COOKIE_SECURE=false' in env
+assert 'PUBLIC_HOST=203.0.113.10' in env
+assert 'HOST_MEMORY_MB=8192' in env
+assert 'MC_MAX_MEMORY_MB=6144' in env
 assert 'AUTH_ENCRYPTION_KEY=replace-' in env
 assert 'AUTH_RECOVERY_PEPPER=replace-' in env
 assert 'ADMIN_PASSWORD=replace-' in env
-assert 'PANEL_DOMAIN=panel.example.com' in env
-assert 'API_DOMAIN=api.example.com' in env
-assert 'API_ORIGIN=https://api.example.com' in env
 assert not re.search(r'^AUTH_RECOVERY_PEPPER=[0-9a-f]{64}$', env, re.M)
 
 caddyfile = (root / 'deploy/caddy/Caddyfile').read_text()
-assert '{$PANEL_DOMAIN}' in caddyfile and '{$API_DOMAIN}' in caddyfile
+assert '{$CADDY_SITE_ADDRESS}' in caddyfile
+assert '@backend path /api/* /ws/*' in caddyfile
 assert 'encode br gzip zstd' in caddyfile
 assert 'reverse_proxy frontend:3000' in caddyfile
 assert 'reverse_proxy backend:4000' in caddyfile
 assert (root / 'deploy/caddy/Dockerfile').exists()
 assert (root / 'app/healthz/route.ts').exists()
+
+installer = (root / 'deploy/ubuntu/install.sh').read_text()
+assert 'PANEL_DOMAIN and API_DOMAIN are required' not in installer
+assert 'CADDY_SITE_ADDRESS_VALUE=":80"' in installer
+assert 'COOKIE_SECURE_VALUE=false' in installer
+assert 'Minecraft join address:' in installer
+assert 'MC_MAX_MEMORY_MB=6144' in installer
+
 print('production deployment structure: OK')
