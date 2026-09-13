@@ -21,6 +21,7 @@ import { ModrinthService } from './modrinth-service.js';
 import { ModService } from './mod-service.js';
 import { PlayerService } from './player-service.js';
 import { SettingsService } from './settings-service.js';
+import { WorldService } from './world-service.js';
 
 export interface AppServices {
   auth: AuthService;
@@ -32,34 +33,31 @@ export interface AppServices {
   mods: ModService;
   players: PlayerService;
   settings: SettingsService;
+  worlds: WorldService;
   audit: AuditRepository;
 }
 
-export function createServices(
-  env: AppEnv,
-  prisma: PrismaClient,
-  runtime: ContainerRuntime,
-): AppServices {
-  const serverRepository = new PrismaServerRepository(prisma);
-  const userRepository = new PrismaUserRepository(prisma);
-  const sessionRepository = new PrismaSessionRepository(prisma);
-  const backupRepository = new PrismaBackupRepository(prisma);
-  const metricRepository = new PrismaMetricRepository(prisma);
-  const modRepository = new PrismaModRepository(prisma);
-  const audit = new PrismaAuditRepository(prisma);
-  const files = new FileService(env);
-  const serverLock = new KeyedLock();
-  const servers = new MinecraftServerService(serverRepository, runtime, files, env, serverLock);
-  const auth = new AuthService(userRepository, sessionRepository, env);
-  const backupProgress = new BackupProgressHub();
-  const backupStorage = new LocalBackupStorage();
-  const backups = new BackupService(env, backupRepository, serverRepository, runtime, backupStorage, backupProgress, serverLock);
-  const backupScheduler = new BackupScheduler(serverRepository, backups);
-  const metrics = new MetricsService(env, serverRepository, runtime, files, metricRepository);
-  const modrinth = new ModrinthService(env);
-  const mods = new ModService(modRepository, serverRepository, files, modrinth);
-  const players = new PlayerService(serverRepository, runtime, files);
-  const settings = new SettingsService(serverRepository, servers, files);
-
-  return { auth, servers, files, backups, backupScheduler, metrics, mods, players, settings, audit };
+export function createServices(env:AppEnv,prisma:PrismaClient,runtime:ContainerRuntime):AppServices{
+  const serverRepository=new PrismaServerRepository(prisma);
+  const userRepository=new PrismaUserRepository(prisma);
+  const sessionRepository=new PrismaSessionRepository(prisma);
+  const backupRepository=new PrismaBackupRepository(prisma);
+  const metricRepository=new PrismaMetricRepository(prisma);
+  const modRepository=new PrismaModRepository(prisma);
+  const audit=new PrismaAuditRepository(prisma);
+  const files=new FileService(env);
+  const serverLock=new KeyedLock();
+  const servers=new MinecraftServerService(serverRepository,runtime,files,env,serverLock);
+  const auth=new AuthService(userRepository,sessionRepository,env);
+  const backupProgress=new BackupProgressHub();
+  const backupStorage=new LocalBackupStorage();
+  const backups=new BackupService(env,backupRepository,serverRepository,runtime,backupStorage,backupProgress,serverLock);
+  const backupScheduler=new BackupScheduler(serverRepository,backups);
+  const metrics=new MetricsService(env,serverRepository,runtime,files,metricRepository);
+  const modrinth=new ModrinthService(env);
+  const mods=new ModService(modRepository,serverRepository,files,modrinth);
+  const players=new PlayerService(serverRepository,runtime,files);
+  const settings=new SettingsService(serverRepository,servers,files);
+  const worlds=new WorldService(serverRepository,runtime,files);
+  return{auth,servers,files,backups,backupScheduler,metrics,mods,players,settings,worlds,audit};
 }
