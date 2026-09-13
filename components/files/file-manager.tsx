@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronRight, Download, FileCode2, FileJson2, Folder, FolderPlus, Pencil, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { apiRequest } from "@/lib/api/client";
 import { useServerStore } from "@/lib/stores/server-store";
 
