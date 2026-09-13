@@ -1,0 +1,165 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username             String    @unique
+  email                String?   @unique
+  passwordHash         String
+  role                 String    @default("owner")
+  failedLoginCount     Int       @default(0)
+  lockedUntil          DateTime?
+  totpEnabled          Boolean   @default(false)
+  totpSecretEncrypted  String?
+  recoveryCodeHashes   String    @default("[]")
+  passwordChangedAt    DateTime  @default(now())
+  lastLoginAt          DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  sessions Session[]
+}
+
+model MinecraftServer {
+  id                  String   @id @default(cuid())
+  name                String
+  containerId         String?  @unique
+  containerName       String   @unique
+  rootPath            String   @unique
+  status              String   @default("offline")
+  version             String
+  loader              String
+  loaderVersion       String?
+  memoryMb            Int      @default(4096)
+  javaVersion         Int      @default(21)
+  restartPolicy       String   @default("unless-stopped")
+  port                 Int      @unique
+  maxPlayers           Int      @default(20)
+  customDomain        String?
+  jvmFlags             String?
+  autoRestartSchedule String?
+  backupEnabled       Boolean  @default(false)
+  backupIntervalMinutes Int    @default(360)
+  backupRetentionCount Int     @default(14)
+  backupDefaultType   String   @default("full")
+  backupLastRunAt     DateTime?
+  settingsJson        String   @default("{}")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  backups Backup[]
+  mods    InstalledMod[]
+  metrics MetricSample[]
+
+  @@index([status])
+}
+
+model InstalledMod {
+  id              String   @id @default(cuid())
+  serverId        String
+  name            String
+  fileName        String
+  version         String?
+  enabled         Boolean  @default(true)
+  source          String?
+  sourceProjectId String?
+  sourceVersionId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  server MinecraftServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([serverId, fileName])
+  @@index([serverId])
+}
+
+model Backup {
+  id               String   @id @default(cuid())
+  serverId         String
+  type             String   @default("full")
+  source           String   @default("manual")
+  fileName         String
+  filePath         String   @unique
+  storageKey       String?
+  sizeBytes        Float
+  minecraftVersion String?
+  loader           String?
+  notes            String?
+  checksumSha256   String?
+  createdAt        DateTime @default(now())
+
+  server MinecraftServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  restoreLogs BackupRestoreLog[]
+
+  @@index([serverId, createdAt])
+}
+
+model BackupRestoreLog {
+  id         String   @id @default(cuid())
+  serverId   String
+  backupId   String
+  status     String
+  message    String?
+  startedAt  DateTime @default(now())
+  completedAt DateTime?
+
+  backup Backup @relation(fields: [backupId], references: [id], onDelete: Cascade)
+
+  @@index([serverId, startedAt])
+  @@index([backupId])
+}
+
+model MetricSample {
+  id            String   @id @default(cuid())
+  serverId      String
+  cpuPercent    Float
+  ramUsedBytes  Float
+  ramLimitBytes Float
+  diskUsedBytes Float
+  networkRx     Float
+  networkTx     Float
+  tps           Float?
+  playersOnline Int?
+  createdAt     DateTime @default(now())
+
+  server MinecraftServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId, createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  serverId  String?
+  metadata  String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([serverId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Session {
+  id            String    @id @default(cuid())
+  userId        String
+  tokenHash     String    @unique
+  csrfTokenHash String
+  ip            String?
+  userAgent     String?
+  createdAt     DateTime  @default(now())
+  lastSeenAt    DateTime  @default(now())
+  expiresAt     DateTime
+  revokedAt     DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([tokenHash])
+}

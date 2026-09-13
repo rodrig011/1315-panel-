@@ -1,0 +1,110 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  role         String   @default("admin")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model MinecraftServer {
+  id                  String   @id @default(cuid())
+  name                String
+  containerId         String?  @unique
+  containerName       String   @unique
+  rootPath            String   @unique
+  status              String   @default("offline")
+  version             String
+  loader              String
+  loaderVersion       String?
+  memoryMb            Int      @default(4096)
+  javaVersion         Int      @default(21)
+  restartPolicy       String   @default("unless-stopped")
+  port                 Int      @unique
+  maxPlayers           Int      @default(20)
+  customDomain        String?
+  jvmFlags             String?
+  autoRestartSchedule String?
+  settingsJson        String   @default("{}")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  backups Backup[]
+  mods    InstalledMod[]
+  metrics MetricSample[]
+
+  @@index([status])
+}
+
+model InstalledMod {
+  id              String   @id @default(cuid())
+  serverId        String
+  name            String
+  fileName        String
+  version         String?
+  enabled         Boolean  @default(true)
+  source          String?
+  sourceProjectId String?
+  sourceVersionId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  server MinecraftServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([serverId, fileName])
+  @@index([serverId])
+}
+
+model Backup {
+  id        String   @id @default(cuid())
+  serverId  String
+  type      String   @default("manual")
+  fileName  String
+  filePath  String   @unique
+  sizeBytes Float
+  createdAt DateTime @default(now())
+
+  server MinecraftServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId, createdAt])
+}
+
+model MetricSample {
+  id            String   @id @default(cuid())
+  serverId      String
+  cpuPercent    Float
+  ramUsedBytes  Float
+  ramLimitBytes Float
+  diskUsedBytes Float
+  networkRx     Float
+  networkTx     Float
+  tps           Float?
+  playersOnline Int?
+  createdAt     DateTime @default(now())
+
+  server MinecraftServer @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId, createdAt])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  serverId  String?
+  metadata  String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([serverId, createdAt])
+  @@index([userId, createdAt])
+}

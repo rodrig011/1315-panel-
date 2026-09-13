@@ -1,0 +1,4 @@
+import * as React from "react";
+import { cn } from "@/lib/utils";
+export function Card({className,...p}:React.HTMLAttributes<HTMLDivElement>){return <div className={cn("rounded-2xl border border-white/[.065] bg-gradient-to-b from-white/[.032] to-white/[.018] shadow-[0_12px_40px_rgba(0,0,0,.14)] backdrop-blur-sm",className)} {...p}/>}
+export function CardHeader({className,...p}:React.HTMLAttributes<HTMLDivElement>){return <div className={cn("flex flex-col space-y-1.5 p-5 sm:p-6",className)} {...p}/>} export function CardTitle({className,...p}:React.HTMLAttributes<HTMLHeadingElement>){return <h3 className={cn("text-[13px] font-semibold tracking-[-.01em]",className)} {...p}/>} export function CardContent({className,...p}:React.HTMLAttributes<HTMLDivElement>){return <div className={cn("p-5 pt-0 sm:p-6 sm:pt-0",className)} {...p}/>} 

@@ -1,0 +1,8 @@
+"use client";
+import * as Dialog from "@radix-ui/react-dialog";
+import { AlertTriangle, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+
+export function ConfirmationDialog({open,onOpenChange,title,description,confirmLabel="Confirm",destructive=false,onConfirm}:{open:boolean;onOpenChange:(open:boolean)=>void;title:string;description:string;confirmLabel?:string;destructive?:boolean;onConfirm:()=>void|Promise<void>}){
+  return <Dialog.Root open={open} onOpenChange={onOpenChange}><Dialog.Portal><Dialog.Overlay className="fixed inset-0 z-[80] bg-black/70 backdrop-blur-sm"/><Dialog.Content className="fixed left-1/2 top-1/2 z-[90] w-[calc(100vw-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-[#0d1016] p-5 shadow-2xl outline-none"><div className="flex items-start gap-3"><div className={`grid size-10 shrink-0 place-items-center rounded-xl ${destructive?"bg-red-500/10 text-red-400":"bg-amber-500/10 text-amber-400"}`}><AlertTriangle className="size-5"/></div><div className="min-w-0 flex-1"><Dialog.Title className="text-base font-semibold">{title}</Dialog.Title><Dialog.Description className="mt-1.5 text-sm leading-6 text-muted-foreground">{description}</Dialog.Description></div><Dialog.Close className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-white/5 hover:text-white" aria-label="Close"><X className="size-4"/></Dialog.Close></div><div className="mt-6 flex justify-end gap-2"><Dialog.Close asChild><Button variant="ghost">Cancel</Button></Dialog.Close><Button variant={destructive?"destructive":"default"} onClick={()=>{void onConfirm();onOpenChange(false)}}>{confirmLabel}</Button></div></Dialog.Content></Dialog.Portal></Dialog.Root>
+}

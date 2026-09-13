@@ -1,0 +1,45 @@
+# Reference template. The backend creates equivalent containers through Docker Engine API.
+# Values in ${...} are deployment/runtime inputs, not application defaults.
+services:
+  minecraft:
+    image: "${MINECRAFT_IMAGE_REPOSITORY}:java${JAVA_VERSION}"
+    container_name: "mcpanel-${SERVER_ID}"
+    restart: "${RESTART_POLICY}"
+    stdin_open: false
+    tty: false
+    environment:
+      EULA: "TRUE"
+      TYPE: "${LOADER}"
+      VERSION: "${MINECRAFT_VERSION}"
+      MEMORY: "${JAVA_HEAP}"
+      UID: "${MC_UID}"
+      GID: "${MC_GID}"
+      ENABLE_RCON: "TRUE"
+      RCON_PASSWORD: "${RCON_PASSWORD}"
+    ports:
+      - "${BIND_ADDRESS}:${HOST_PORT}:25565/tcp"
+    volumes:
+      - "${SERVER_ROOT}/data:/data"
+      - "${SERVER_ROOT}/mods:/data/mods"
+      - "${SERVER_ROOT}/config:/data/config"
+      - "${SERVER_ROOT}/logs:/data/logs"
+    networks:
+      - mcpanel
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "mc-health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+networks:
+  mcpanel:
+    name: "${DOCKER_NETWORK}"
+    external: true

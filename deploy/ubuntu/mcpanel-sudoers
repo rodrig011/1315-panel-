@@ -1,0 +1,7 @@
+mcpanel ALL=(root) NOPASSWD: /usr/local/sbin/mcpanel-deploy-release
+mcpanel ALL=(root) NOPASSWD: /usr/local/sbin/mcpanel-rollback *
+mcpanel ALL=(root) NOPASSWD: /usr/local/sbin/mcpanel-control-backup
+mcpanel ALL=(root) NOPASSWD: /usr/local/sbin/mcpanel-status
+mcpanel ALL=(root) NOPASSWD: /usr/local/sbin/mcpanel-harden-ssh
+mcpanel ALL=(root) NOPASSWD: /bin/systemctl restart mcpanel-stack.service
+mcpanel ALL=(root) NOPASSWD: /bin/systemctl status mcpanel-stack.service
