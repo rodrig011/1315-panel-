@@ -38,11 +38,13 @@ export interface ContainerMetrics {
   memoryLimitBytes: number;
   networkRxBytes: number;
   networkTxBytes: number;
+  uptimeSeconds?: number;
 }
 
 export interface MetricSnapshot extends ContainerMetrics {
   diskUsedBytes: number;
   tps: number | null;
+  mspt?: number | null;
   playersOnline: number | null;
   timestamp: string;
 }
