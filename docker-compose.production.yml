@@ -94,14 +94,14 @@ services:
       context: ./app
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${API_ORIGIN}
+        NEXT_PUBLIC_API_URL: ""
     restart: unless-stopped
     user: "${MCPANEL_UID}:${MCPANEL_GID}"
     environment:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
-      NEXT_PUBLIC_API_URL: ${API_ORIGIN}
+      NEXT_PUBLIC_API_URL: ""
     networks:
       - app
     security_opt:
@@ -122,9 +122,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      PANEL_DOMAIN: ${PANEL_DOMAIN}
-      API_DOMAIN: ${API_DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL}
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS}
     ports:
       - "0.0.0.0:80:80"
       - "0.0.0.0:443:443"
