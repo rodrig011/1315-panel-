@@ -1,150 +1,184 @@
-# Ubuntu 24.04 production deployment
+# 1315 Panel — Ubuntu 24.04 deployment
 
-This guide deploys MCPanel on a fresh Ubuntu 24.04 VPS with Docker Engine, Docker Compose, Node.js 24 LTS, UFW, fail2ban, unattended security updates, Caddy, and a non-root `mcpanel` deploy account.
+This guide deploys **1315 Panel** and **1315 SMP** on a fresh Ubuntu 24.04 VPS.
+
+Target initial host:
+
+- Ubuntu 24.04
+- public IPv4
+- 8 GB RAM
+- 2 vCPU
+- 80 GB disk
+- Chicago
+- no domain required
+- panel: `http://PUBLIC_IP/`
+- Minecraft: `PUBLIC_IP:25565`
 
 ## Production topology
 
-- Caddy is the only public web service (`80/tcp`, `443/tcp`).
-- Minecraft publishes only `25565/tcp` by default.
-- Frontend and backend have no host-published ports.
-- The backend **does not receive `/var/run/docker.sock`**. It talks to a Docker socket proxy on an internal-only network.
-- Only the socket proxy mounts the Docker socket, and its API sections are explicitly allowlisted.
-- The `mcpanel` Linux user is **not** added to the `docker` group.
-- Persistent server data lives under `/srv/mcpanel/servers`.
-- Control-plane state lives under `/opt/mcpanel`.
-- Caddy/app operational logs live under `/var/log/mcpanel`; Docker JSON logs are size-rotated by Docker.
+```text
+Internet
+  22/tcp      -> SSH
+  80/tcp      -> Caddy -> frontend, /api/* + /ws/* -> backend
+  443/tcp     -> Caddy (used later for domain/HTTPS mode)
+  25565/tcp   -> managed Minecraft container
 
-> Docker documents that container-published ports can bypass UFW. This deployment therefore uses both UFW and a persistent `DOCKER-USER` allowlist. Do not remove `mcpanel-firewall.service`.
+backend -> private control network -> docker-socket-proxy -> /var/run/docker.sock
+```
 
-## 1. DNS / HTTPS
+Frontend, backend, and Docker socket proxy have no public host ports. The backend never mounts `/var/run/docker.sock`; only the private proxy does. The `mcpanel` deploy account is not added to the Docker group.
 
-Production uses separate web origins:
+Persistent paths:
 
 ```text
-panel.example.com -> frontend
-api.example.com   -> backend REST + WebSockets
-play.example.com  -> Minecraft TCP/25565
+/opt/mcpanel/                 application/control-plane state
+/srv/mcpanel/servers/         Minecraft server data
+/var/log/mcpanel/             service logs
 ```
 
-Create `A` records for all three names pointing at the VPS IPv4. `panel` and `api` may be proxied through Cloudflare; keep `play` DNS-only unless you intentionally use Cloudflare Spectrum. Caddy automatically obtains and renews public certificates for both web domains. See `DOMAIN-HTTPS.md` for exact DNS, optional Minecraft SRV, Cloudflare, WebSocket, health-check, compression, and TLS test instructions.
+## First boot — no domain
 
-## 2. Upload the project
-
-From your workstation:
+SSH to the new VPS as root and run:
 
 ```bash
-scp minecraft-panel.zip root@YOUR_VPS_IP:/root/
-ssh root@YOUR_VPS_IP
-apt-get update && apt-get install -y unzip
-mkdir -p /root/mcpanel-source
-unzip /root/minecraft-panel.zip -d /root/mcpanel-source
-cd /root/mcpanel-source/minecraft-panel
+apt-get update
+apt-get install -y git
+git clone https://github.com/rodrig011/1315-panel-.git
+cd 1315-panel-
+sudo ./deploy/ubuntu/install.sh
 ```
 
-## 3. Run the installer
-
-With a domain:
+If public-IP autodetection is wrong, provide it explicitly:
 
 ```bash
-export PANEL_DOMAIN=panel.example.com
-export API_DOMAIN=api.example.com
-export PANEL_ORIGIN=https://panel.example.com
-export API_ORIGIN=https://api.example.com
-export ACME_EMAIL=you@example.com
-export PUBLIC_HOST=play.example.com
-# Optional: set this yourself; otherwise a strong random password is generated.
-export ADMIN_PASSWORD='use-a-long-unique-password-here'
-
-bash deploy/ubuntu/install.sh
+sudo PUBLIC_IP=203.0.113.10 ./deploy/ubuntu/install.sh
 ```
 
-Caddy production deployment requires DNS names for browser-trusted HTTPS. Point the `panel` and `api` records at the VPS before running the installer.
+The installer does **not** require `PANEL_DOMAIN` or `API_DOMAIN`.
 
-The installer:
+It will:
 
-1. installs base packages, Docker Engine + Compose plugin, and Node.js 24 LTS;
-2. creates the non-root `mcpanel` user without Docker-group membership;
-3. creates `/opt/mcpanel`, `/srv/mcpanel/servers`, and `/var/log/mcpanel`;
-4. copies the app to `/opt/mcpanel/app`;
-5. generates `/opt/mcpanel/.env` with a random JWT secret;
-6. enables UFW, fail2ban, unattended security updates, Docker ingress filtering, and log rotation;
-7. builds and starts the production Compose stack.
+1. install Docker Engine, Compose, Node.js 24, and system dependencies;
+2. create the non-root `mcpanel` deploy user;
+3. create the application/server/log directories;
+4. copy this repository to `/opt/mcpanel/app`;
+5. generate opaque-session/TOTP/recovery secrets and a bootstrap admin password;
+6. configure UFW, a persistent Docker ingress policy, fail2ban, log rotation, and unattended security updates;
+7. configure Caddy for same-origin HTTP routing by public IP;
+8. build and start the production Compose stack;
+9. print the exact panel URL, admin username, bootstrap password, Minecraft address, and status command.
 
-Node 24 is the current LTS line used by this setup. The app itself is also built from `node:24-bookworm-slim` images.
+Expected first-boot output includes:
 
-## 4. Verify the non-root SSH account **before** disabling root SSH
+```text
+Panel URL: http://PUBLIC_IP
+Admin username: admin
+Bootstrap password: <generated value>
+Minecraft join address: PUBLIC_IP:25565
+Status command: sudo mcpanel-status
+```
 
-Keep the original root session open. From a second terminal on your workstation:
+Open the printed panel URL in your browser, sign in, and change the bootstrap password.
+
+## HTTP/IP security tradeoff
+
+Plain HTTP by IP is intentionally supported so the server can be deployed before DNS is available.
+
+In this mode:
+
+```dotenv
+CADDY_SITE_ADDRESS=:80
+PANEL_ORIGIN=http://PUBLIC_IP
+COOKIE_DOMAIN=
+COOKIE_SECURE=false
+PUBLIC_HOST=PUBLIC_IP
+```
+
+The session cookie remains HttpOnly + SameSite and CSRF protection remains active, but HTTP does not encrypt the browser connection. Treat this as a temporary bootstrap mode and add HTTPS when a domain is available.
+
+## Create and launch 1315 SMP
+
+After login:
+
+1. Open **Create server**.
+2. Keep the default name **1315 SMP**.
+3. Select the desired Minecraft version (current default `1.21.1`).
+4. Select **NeoForge** for the initial modded setup.
+5. Keep RAM at **6 GB**.
+6. Optionally enter a world seed.
+7. Review the configuration.
+8. Click **Launch server**.
+
+The wizard waits for the backend to:
+
+- create the server database record;
+- create `/srv/mcpanel/servers/<server-id>` and persistent runtime directories;
+- write `server.properties` and accept the EULA;
+- provision the labeled isolated Docker container;
+- start the container.
+
+It redirects to Overview only after backend confirmation.
+
+The 8 GB VPS profile sets:
+
+```dotenv
+HOST_MEMORY_MB=8192
+MC_MAX_MEMORY_MB=6144
+MC_HEAP_RATIO=0.92
+```
+
+The Minecraft container is capped at 6144 MB and Java receives roughly 5.5 GiB heap, preserving headroom for Ubuntu, Docker, the frontend/backend, Caddy, and filesystem cache. The backend rejects allocations above the configured host profile.
+
+## Verify the deployment
 
 ```bash
-ssh mcpanel@YOUR_VPS_IP
+sudo mcpanel-status
+sudo systemctl status mcpanel-stack.service
+sudo systemctl status mcpanel-firewall.service
+sudo systemctl status fail2ban
+sudo ufw status verbose
+sudo iptables -S DOCKER-USER
+sudo ss -lntp
 ```
 
-The installer copies root's `authorized_keys` to `mcpanel` when a key exists. If the login does not work, fix the key before continuing.
+From another computer:
 
-After `ssh mcpanel@...` succeeds:
+```bash
+curl -fsS http://PUBLIC_IP/healthz
+curl -fsS http://PUBLIC_IP/api/healthz
+```
+
+Only SSH, HTTP, HTTPS, and Minecraft should be reachable publicly.
+
+## Verify the non-root SSH account before disabling root login
+
+Keep the original root SSH session open. From another terminal:
+
+```bash
+ssh mcpanel@PUBLIC_IP
+```
+
+If that works, harden SSH:
 
 ```bash
 sudo mcpanel-harden-ssh
 ```
 
-This installs an sshd drop-in with:
-
-```text
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-PermitRootLogin no
-PubkeyAuthentication yes
-```
-
-It runs `sshd -t` before reloading sshd.
-
-## 5. Verify the services
-
-As `mcpanel`:
-
-```bash
-sudo mcpanel-status
-```
-
-Or, for detailed container state:
-
-```bash
-sudo systemctl status mcpanel-stack.service
-sudo systemctl status mcpanel-firewall.service
-sudo systemctl status fail2ban
-```
-
-From another machine:
-
-```bash
-curl -fsS https://panel.example.com/healthz
-curl -fsS https://api.example.com/healthz
-```
-
-For an IP-only HTTP bootstrap, replace the URL accordingly.
-
-Check that the only public listeners expected by the deployment are SSH, HTTP, HTTPS, and Minecraft:
-
-```bash
-sudo ss -lntp
-sudo ufw status numbered
-sudo iptables -S DOCKER-USER
-```
+The helper validates sshd configuration before reload and disables password authentication plus root SSH login.
 
 ## Directory layout
 
 ```text
 /opt/mcpanel/
-  .env                         # root-only production secrets
+  .env
   docker-compose.production.yml
-  app/                         # current application source
-  data/mcpanel.db              # SQLite database
-  caddy/data/                  # TLS certificates/state
+  app/
+  data/mcpanel.db
+  caddy/data/
   caddy/config/
-  staging/                     # upload next release here
-  releases/                    # last five rollback snapshots
-  control-backups/             # control-plane backups
+  staging/
+  releases/
+  control-backups/
 
 /srv/mcpanel/servers/
   <server-id>/
@@ -161,98 +195,64 @@ sudo iptables -S DOCKER-USER
 
 ## Production environment
 
-The canonical template is `.env.production.example`. The installer writes `/opt/mcpanel/.env` with mode `0600`.
-
-To edit it:
+The installer writes `/opt/mcpanel/.env` with mode `0600`.
 
 ```bash
 sudoedit /opt/mcpanel/.env
 sudo systemctl restart mcpanel-stack.service
 ```
 
-Important values:
-
-```dotenv
-PANEL_DOMAIN=panel.example.com
-API_DOMAIN=api.example.com
-PANEL_ORIGIN=https://panel.example.com
-API_ORIGIN=https://api.example.com
-ACME_EMAIL=you@example.com
-PUBLIC_HOST=play.example.com
-DATABASE_URL=file:/app/data/mcpanel.db
-DOCKER_HOST=tcp://socket-proxy:2375
-SERVER_DATA_ROOT=/srv/mcpanel/servers
-DOCKER_NETWORK=mcpanel-internal
-```
-
-Never publish `socket-proxy:2375`, and never replace `DOCKER_HOST` with a public TCP Docker daemon.
+Never publish `socket-proxy:2375` and never point `DOCKER_HOST` at a public Docker daemon.
 
 ## Firewall policy
 
-UFW permits only:
+UFW and the persistent `DOCKER-USER` policy allow only:
 
 ```text
-OpenSSH
+SSH
 80/tcp
 443/tcp
 25565/tcp
 ```
 
-View it with:
-
-```bash
-sudo ufw status verbose
-```
-
-Because Docker manipulates iptables directly, `/usr/local/sbin/mcpanel-firewall` also enforces the container ingress allowlist in `DOCKER-USER`.
-
-This means a server configured to publish a different Minecraft host port will intentionally be unreachable until the firewall policy is explicitly changed. The production default is `25565` only.
+Docker can bypass ordinary UFW rules for published ports, which is why `mcpanel-firewall.service` also filters container ingress.
 
 ## Health checks
 
-Compose health checks are included for:
+Compose health checks cover:
 
-- backend: `GET http://127.0.0.1:4000/healthz` inside its container;
-- frontend: `GET http://127.0.0.1:3000` inside its container;
-- Docker socket proxy: Docker `_ping` endpoint.
+- backend: `/healthz` on port 4000 inside the container;
+- frontend: `/healthz` on port 3000 inside the container;
+- Docker socket proxy: Docker `_ping`.
 
-Inspect them:
+Caddy also health-checks the private frontend/backend upstreams.
 
-```bash
-cd /opt/mcpanel
-sudo docker compose --env-file .env -f docker-compose.production.yml ps
+## Backups
+
+Minecraft backups are managed by the application and stored under each server directory:
+
+```text
+/srv/mcpanel/servers/<server-id>/backups/
 ```
 
-The deploy user does not have direct Docker access by design; use `sudo mcpanel-status` for normal checks.
-
-## Update workflow
-
-The safest workflow stages a complete new source tree, snapshots the current source + SQLite database, builds the replacement images, starts them, and verifies frontend/backend health. A failed health check automatically restores the pre-update source/database snapshot.
-
-On your workstation, unpack the new release. Then upload its contents to staging:
+Control-plane SQLite backup:
 
 ```bash
-rsync -az --delete ./minecraft-panel/ mcpanel@YOUR_VPS_IP:/opt/mcpanel/staging/
+sudo mcpanel-control-backup
 ```
 
-On the VPS:
+## Updating
+
+For a normal Git-based update:
 
 ```bash
-ssh mcpanel@YOUR_VPS_IP
+cd /path/to/1315-panel-
+git pull --ff-only
+sudo rsync -a --delete --exclude .git --exclude node_modules --exclude .next ./ /opt/mcpanel/staging/
 sudo mcpanel-deploy-release
 ```
 
-Successful output includes a rollback ID such as:
-
-```text
-Deployment successful. Rollback id: 20260912T021500Z
-```
-
-The last five release snapshots are retained under `/opt/mcpanel/releases`.
-
-### Dependency lockfiles
-
-Commit `package-lock.json` files before a real production release whenever possible. The included Dockerfiles use `npm ci` when a lockfile exists and fall back to `npm install` only because this generated source bundle may not yet contain lockfiles.
+The release helper snapshots the current code and SQLite control database, deploys the staged release, checks health, and rolls back automatically if the replacement is unhealthy.
 
 ## Rollback
 
@@ -262,133 +262,34 @@ List available snapshots:
 ls -1 /opt/mcpanel/releases
 ```
 
-Rollback both application source **and the SQLite database** to a snapshot:
+Rollback:
 
 ```bash
-sudo mcpanel-rollback 20260912T021500Z
+sudo mcpanel-rollback <release-timestamp>
 ```
 
-A database rollback discards control-plane changes made after that snapshot. Minecraft world/server data under `/srv/mcpanel/servers` is not replaced by control-plane rollback; use the panel's server backup/restore feature for game data.
+Minecraft world data under `/srv/mcpanel/servers` is independent of control-plane release rollback.
 
-## Backup workflow
+## Later: domain + automatic HTTPS
 
-### Minecraft data
+When a domain becomes available, point an A record such as `panel.example.com` to the VPS and edit `/opt/mcpanel/.env`:
 
-Use the panel's built-in backup scheduler for world/full-server archives. Those remain under:
-
-```text
-/srv/mcpanel/servers/<server-id>/backups
+```dotenv
+CADDY_SITE_ADDRESS=panel.example.com
+PANEL_DOMAIN=panel.example.com
+PANEL_ORIGIN=https://panel.example.com
+COOKIE_SECURE=true
+PUBLIC_HOST=play.example.com
 ```
 
-### Control-plane backup
+`PUBLIC_HOST` is optional; keep the public IPv4 if you do not yet have Minecraft DNS.
 
-Run:
+Restart the stack:
 
 ```bash
-sudo mcpanel-control-backup
+sudo systemctl restart mcpanel-stack.service
 ```
 
-This creates a compressed backup under:
+Caddy will obtain and renew the public certificate automatically. API and WebSocket paths remain same-origin (`/api/*`, `/ws/*`); no application restructuring is required.
 
-```text
-/opt/mcpanel/control-backups/mcpanel-control-<timestamp>.tar.gz
-```
-
-It uses SQLite's `.backup` command rather than copying a live database file. Control-plane archives older than 30 days are pruned by the helper.
-
-For disaster recovery, copy these archives plus the Minecraft backup archives to storage outside the VPS. Keeping the only backup on the same machine does not protect against disk/VPS loss.
-
-## Restore a control-plane backup manually
-
-```bash
-sudo systemctl stop mcpanel-stack.service
-sudo mkdir -p /root/mcpanel-control-restore
-sudo tar -xzf /opt/mcpanel/control-backups/mcpanel-control-YYYYMMDDTHHMMSSZ.tar.gz -C /root/mcpanel-control-restore
-```
-
-Inspect the extracted files before replacing anything. Then restore the database/env as required and start the stack:
-
-```bash
-sudo cp /root/mcpanel-control-restore/YYYYMMDDTHHMMSSZ/mcpanel.db /opt/mcpanel/data/mcpanel.db
-sudo chown mcpanel:mcpanel /opt/mcpanel/data/mcpanel.db
-sudo systemctl start mcpanel-stack.service
-```
-
-Restore `.env` only when you intentionally need the old credentials/configuration.
-
-## Logs
-
-Caddy access logs:
-
-```bash
-sudo tail -f /var/log/mcpanel/caddy/access.log
-```
-
-Container application logs:
-
-```bash
-sudo journalctl -u docker -f
-```
-
-For one-off debugging as root:
-
-```bash
-cd /opt/mcpanel
-sudo docker compose --env-file .env -f docker-compose.production.yml logs --tail=200 backend
-sudo docker compose --env-file .env -f docker-compose.production.yml logs --tail=200 frontend
-sudo docker compose --env-file .env -f docker-compose.production.yml logs --tail=200 caddy
-```
-
-Docker's `json-file` logs are capped at 10 MB × 5 files per container. `/etc/logrotate.d/mcpanel` additionally rotates host file logs daily.
-
-## fail2ban
-
-```bash
-sudo fail2ban-client status sshd
-```
-
-Default policy installed by this project:
-
-- 5 failures within 10 minutes;
-- 1-hour ban;
-- systemd sshd backend.
-
-## Automatic security updates
-
-Verify:
-
-```bash
-systemctl status unattended-upgrades
-cat /etc/apt/apt.conf.d/20auto-upgrades
-```
-
-Only Ubuntu security updates are enabled automatically. Docker, Node, app images, and the application itself should be updated through the controlled release workflow rather than an unattended container updater.
-
-## HTTPS troubleshooting
-
-If Caddy cannot issue a certificate:
-
-```bash
-cd /opt/mcpanel
-sudo docker compose --env-file .env -f docker-compose.production.yml logs --tail=200 caddy
-```
-
-Check that:
-
-1. `PANEL_SITE_ADDRESS` is the hostname, not an internal IP;
-2. its DNS `A` record points to this VPS;
-3. ports 80 and 443 are allowed by the VPS provider/security group as well as UFW;
-4. no other process occupies ports 80/443.
-
-## Security notes
-
-- The Docker socket is root-equivalent. It is mounted only into the dedicated socket-proxy container.
-- The proxy is never published to the host or internet and lives on the `control` internal Docker network.
-- The backend can reach only the Docker API sections it requires for managed containers/images/networks/exec operations.
-- The frontend has no Docker connectivity.
-- `mcpanel` is not a member of the `docker` group.
-- App containers run with the numeric non-root UID/GID of the `mcpanel` host account and drop Linux capabilities.
-- Caddy gets only `NET_BIND_SERVICE` so it can bind privileged HTTP/HTTPS ports.
-- The backend verifies its own managed-container labels before lifecycle operations.
-- The generated `.env` is root-readable only.
-- Password/root SSH are not disabled until you explicitly verify key login to the deploy account.
+See `DOMAIN-HTTPS.md` for DNS/SRV/Cloudflare details.
