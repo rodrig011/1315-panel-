@@ -57,8 +57,13 @@ jobs:
       - name: Validate Ubuntu installer syntax
         run: bash -n deploy/ubuntu/install.sh
 
+      - name: Validate deployment structure
+        run: python3 deploy/tests/validate-production.py
+
       - name: Validate production Compose
-        run: docker compose --env-file .env.example -f docker-compose.production.yml config >/tmp/mcpanel-compose.yml
+        run: |
+          cp .env.example .env
+          docker compose --env-file .env.example -f docker-compose.production.yml config >/tmp/mcpanel-compose.yml
 
       - name: Commit generated lockfiles
         if: success() && github.event_name == 'push'
