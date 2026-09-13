@@ -1,0 +1,72 @@
+name: Production integration validation
+
+on:
+  push:
+    branches:
+      - codex/production-integration
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Lint frontend
+        run: npm run lint
+
+      - name: Typecheck frontend
+        run: npm run typecheck
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm install
+
+      - name: Generate Prisma client
+        working-directory: backend
+        run: npm run prisma:generate
+
+      - name: Typecheck backend
+        working-directory: backend
+        run: npm run typecheck
+
+      - name: Test backend
+        working-directory: backend
+        run: npm run test
+
+      - name: Build backend
+        working-directory: backend
+        run: npm run build
+
+      - name: Validate Ubuntu installer syntax
+        run: bash -n deploy/ubuntu/install.sh
+
+      - name: Validate production Compose
+        run: docker compose --env-file .env.example -f docker-compose.production.yml config >/tmp/mcpanel-compose.yml
+
+      - name: Commit generated lockfiles
+        if: success() && github.event_name == 'push'
+        run: |
+          if git status --porcelain package-lock.json backend/package-lock.json | grep -q .; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json backend/package-lock.json
+            git commit -m "chore: add reproducible npm lockfiles [skip ci]"
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
